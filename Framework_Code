@@ -1,50 +1,9 @@
 from pyspark.sql.functions import explode,col,lit,monotonically_increasing_id
 from pyspark.sql.types import *
 import re
-
-                
-def Transform_Json(file_path, schema, volume):
-    target_table="Json_data_brz"
-    print(f"Processing file: {file_path}")
-    
-    raw_df = spark.read.option("multiLine", True).json(file_path)
-    exploded_df = raw_df.select(explode("data.popular_dishes").alias("dish"))
-    flattened_df = exploded_df.select("dish.*")
-
-   
-    df = flattened_df.withColumn("grubhub_menu_item_id", monotonically_increasing_id())
-
-    df=df.select("grubhub_menu_item_id", "display_name", "description", "price", "photo_count","review_count")
-    df.write.mode("overwrite").saveAsTable("bronze_layer.json_data.json_data_brz")
-
-
-def Transform_csv(file_path,schema,volume):
-    df=spark.read.format("csv")\
-        .option("inferschema","true")\
-            .option("header","true")\
-                .option("delimiter",",")\
-                    .load(file_path)
-    df.printSchema()
-    # Vehicle Location  not needed2020 Census Tract county
-    df=df.select("*").filter("`Model Year` > 2015")
-    df=df.drop("Vehicle Location")
-    df=df.drop("2020 Census Tract","County")
-    df.createOrReplaceTempView("csv_data")
-
-    makes=spark.sql("select distinct Make from csv_data").collect()
-    makes=[row["Make"] for row in makes]
-    print(makes)
-
-    for make in makes:
-        make=re.sub(r'\W+', '_', make.strip().upper())
-        query=f" select * from csv_data where Make='{make}' "
-        clean_df=spark.sql(query)
-        clean_df.write.mode("overwrite")\
-            .format("delta")\
-                .option("delta.columnMapping.mode", "name")\
-                    .saveAsTable(f"bronze_layer.csv_data.Csvdata_{make}_brz")
-
-
+from Csv_Transformer import Transform_csv
+from Json_Transformer import Transform_Json
+               
 def list_files_recursive(base_path):
     files = []
     try:
