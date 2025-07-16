@@ -1,0 +1,26 @@
+
+def Transform_csv(file_path,schema,volume):
+    df=spark.read.format("csv")\
+        .option("inferschema","true")\
+            .option("header","true")\
+                .option("delimiter",",")\
+                    .load(file_path)
+    df.printSchema()
+    # Vehicle Location  not needed2020 Census Tract county
+    df=df.select("*").filter("`Model Year` > 2015")
+    df=df.drop("Vehicle Location")
+    df=df.drop("2020 Census Tract","County")
+    df.createOrReplaceTempView("csv_data")
+
+    makes=spark.sql("select distinct Make from csv_data").collect()
+    makes=[row["Make"] for row in makes]
+    print(makes)
+
+    for make in makes:
+        make=re.sub(r'\W+', '_', make.strip().upper())
+        query=f" select * from csv_data where Make='{make}' "
+        clean_df=spark.sql(query)
+        clean_df.write.mode("overwrite")\
+            .format("delta")\
+                .option("delta.columnMapping.mode", "name")\
+                    .saveAsTable(f"bronze_layer.csv_data.Csvdata_{make}_brz")
