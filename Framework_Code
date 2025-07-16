@@ -1,0 +1,85 @@
+from pyspark.sql.functions import explode,col,lit,monotonically_increasing_id
+from pyspark.sql.types import *
+import re
+
+                
+def Transform_Json(file_path, schema, volume):
+    target_table="Json_data_brz"
+    print(f"Processing file: {file_path}")
+    
+    raw_df = spark.read.option("multiLine", True).json(file_path)
+    exploded_df = raw_df.select(explode("data.popular_dishes").alias("dish"))
+    flattened_df = exploded_df.select("dish.*")
+
+   
+    df = flattened_df.withColumn("grubhub_menu_item_id", monotonically_increasing_id())
+
+    df=df.select("grubhub_menu_item_id", "display_name", "description", "price", "photo_count","review_count")
+    df.write.mode("overwrite").saveAsTable("bronze_layer.json_data.json_data_brz")
+
+
+def Transform_csv(file_path,schema,volume):
+    df=spark.read.format("csv")\
+        .option("inferschema","true")\
+            .option("header","true")\
+                .option("delimiter",",")\
+                    .load(file_path)
+    df.printSchema()
+    # Vehicle Location  not needed2020 Census Tract county
+    df=df.select("*").filter("`Model Year` > 2015")
+    df=df.drop("Vehicle Location")
+    df=df.drop("2020 Census Tract","County")
+    df.createOrReplaceTempView("csv_data")
+
+    makes=spark.sql("select distinct Make from csv_data").collect()
+    makes=[row["Make"] for row in makes]
+    print(makes)
+
+    for make in makes:
+        make=re.sub(r'\W+', '_', make.strip().upper())
+        query=f" select * from csv_data where Make='{make}' "
+        clean_df=spark.sql(query)
+        clean_df.write.mode("overwrite")\
+            .format("delta")\
+                .option("delta.columnMapping.mode", "name")\
+                    .saveAsTable(f"bronze_layer.csv_data.Csvdata_{make}_brz")
+
+
+def list_files_recursive(base_path):
+    files = []
+    try:
+        items = dbutils.fs.ls(base_path)
+        for item in items:
+            if item.isDir():
+                files.extend(list_files_recursive(item.path))  # Recurse into subdir
+            else:
+                files.append(item.path)
+    except Exception as e:
+        print(f"Error accessing {base_path}: {e}")
+    return files
+
+
+catalog = "landing_data"
+query=f"show schemas from {catalog}"
+schemas_df = spark.sql(query)
+schemas = [row["databaseName"] for row in schemas_df.collect()]
+
+for schema in schemas:
+    q=f"SHOW VOLUMES IN {catalog}.{schema}"
+    volumes_df = spark.sql(q)
+    volume_names = [row["volume_name"] for row in volumes_df.collect()]
+    
+    for volume in volume_names:
+        volume_path = f"dbfs:/Volumes/{catalog}/{schema}/{volume}"
+        print(f"Scanning: {volume_path}")
+        all_files = list_files_recursive(volume_path)
+        
+        for file_path in all_files:
+            print(f"{file_path}")
+            if(file_path.endswith(".csv")):
+                Transform_csv(file_path,schema,volume)
+            elif(file_path.endswith(".json")):
+                Transform_Json(file_path,schema,volume)
+
+
+
