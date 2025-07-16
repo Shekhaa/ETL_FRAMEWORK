@@ -1,0 +1,14 @@
+def Transform_Json(file_path, schema, volume):
+    target_table="Json_data_brz"
+    print(f"Processing file: {file_path}")
+    
+    raw_df = spark.read.option("multiLine", True).json(file_path)
+    exploded_df = raw_df.select(explode("data.popular_dishes").alias("dish"))
+    flattened_df = exploded_df.select("dish.*")
+
+   
+    df = flattened_df.withColumn("grubhub_menu_item_id", monotonically_increasing_id())
+
+    df=df.select("grubhub_menu_item_id", "display_name", "description", "price", "photo_count","review_count")
+    df.write.mode("overwrite").saveAsTable("bronze_layer.json_data.json_data_brz")
+
